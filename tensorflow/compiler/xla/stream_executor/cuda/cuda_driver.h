@@ -75,8 +75,28 @@ class CreatedContexts {
     return Live()->find(context) != Live()->end();
   }
 
+  static GpuContext* Get(CUcontext context) {
+    absl::ReaderMutexLock lock(&mu_);
+    CHECK(Live()->find(context) != Live()->end()) << context;
+    return (*Live())[context].get();
+  }
+
+  // Returns whether device ordinal is a member of the live ordinal set.
+  static bool OrdinalHas(int ordinal, int context_idx) {
+    absl::ReaderMutexLock lock(&mu_);
+    return ((LiveOrdinal()->find(ordinal) != LiveOrdinal()->end()) &&
+            ((*LiveOrdinal())[ordinal].size() > context_idx) &&
+            ((*LiveOrdinal())[ordinal][context_idx] != nullptr));
+  }
+
+  static CUcontext OrdinalGet(int ordinal, int context_idx) {
+    absl::ReaderMutexLock lock(&mu_);
+    return (*LiveOrdinal())[ordinal][context_idx];
+  }
+
   // Adds context to the live set, or returns it if it's already present.
-  static GpuContext* Add(CUcontext context, int device_ordinal) {
+  static GpuContext* Add(CUcontext context, int device_ordinal,
+                         int context_idx) {
     CHECK(context != nullptr);
     absl::MutexLock lock(&mu_);
 
@@ -85,7 +105,11 @@ class CreatedContexts {
     if (insert_result.second) {
       // context was not present in the map.  Add it.
       it->second = std::make_unique<GpuContext>(context, next_id_++);
-      (*LiveOrdinal())[device_ordinal].push_back(context);
+      auto& ctx_vec = (*LiveOrdinal())[device_ordinal];
+      if (ctx_vec.size() <= context_idx) {
+        ctx_vec.resize(context_idx + 1);
+      }
+      ctx_vec[context_idx] = context;
     }
     return it->second.get();
   }
