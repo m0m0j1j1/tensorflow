@@ -79,6 +79,9 @@ class DeviceContext : public core::RefCounted {
   // "cpu_tensor" is a tensor on a CPU. Copies "cpu_tensor" into
   // "device_tensor" which is on a non-CPU device "device". "device_tensor"
   // must be allocated to be of the same size as "cpu_tensor".
+  // "tensor_holder" is used to hold a reference of the "cpu_tensor" when
+  // necessary. This usually happens when the HtoD stream-merge is enabled,
+  // see GPUOptions::STREAM_MERGE_OPTIONS.
   virtual void CopyCPUTensorToDevice(
       const Tensor* cpu_tensor, Device* device, Tensor* device_tensor,
       StatusCallback done, bool sync_dst_compute = true,

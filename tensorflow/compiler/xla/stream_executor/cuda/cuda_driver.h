@@ -75,13 +75,15 @@ class CreatedContexts {
     return Live()->find(context) != Live()->end();
   }
 
+  // Returns the GpuContext that associated to the given CUcontext.
   static GpuContext* Get(CUcontext context) {
     absl::ReaderMutexLock lock(&mu_);
     CHECK(Live()->find(context) != Live()->end()) << context;
     return (*Live())[context].get();
   }
 
-  // Returns whether device ordinal is a member of the live ordinal set.
+  // Returns whether device ordinal is a member of the live ordinal set and
+  // there is a context of the given index.
   static bool OrdinalHas(int ordinal, int context_idx) {
     absl::ReaderMutexLock lock(&mu_);
     return ((LiveOrdinal()->find(ordinal) != LiveOrdinal()->end()) &&
@@ -89,6 +91,7 @@ class CreatedContexts {
             ((*LiveOrdinal())[ordinal][context_idx] != nullptr));
   }
 
+  // Returns the context of the given ordinal and index.
   static CUcontext OrdinalGet(int ordinal, int context_idx) {
     absl::ReaderMutexLock lock(&mu_);
     return (*LiveOrdinal())[ordinal][context_idx];

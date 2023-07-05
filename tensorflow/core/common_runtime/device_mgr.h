@@ -176,6 +176,7 @@ class DynamicDeviceMgr : public DeviceMgr {
   // buffer only for that purpose.
   DeviceCircularBuffer stale_devices_ TF_GUARDED_BY(devices_mu_);
 
+  // Initialize the multi-stream related information.
   void InitStreamDevice();
 
   int stream_group_count_;

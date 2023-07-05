@@ -41,7 +41,6 @@ limitations under the License.
 #include "tensorflow/core/framework/session_state.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/tensor_holder.h"
-#include "tensorflow/core/framework/tensor_reference.h"
 #include "tensorflow/core/framework/tensor_shape.h"
 #include "tensorflow/core/framework/tensor_shape.pb.h"  // TODO(b/62899350): Remove
 #include "tensorflow/core/framework/tracking_allocator.h"
