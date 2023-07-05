@@ -344,7 +344,7 @@ void GPUUtil::CopyCPUTensorToGPU(const Tensor* cpu_tensor,
   if (gpu_device->merge_HtoD_copy_stream()) {
     recv_host_to_device_stream = recv_stream;
   } else {
-    auto recv_host_to_device_stream =
+    recv_host_to_device_stream =
         static_cast<const GPUDeviceContext*>(device_context)
             ->host_to_device_stream();
     if (recv_host_to_device_stream == nullptr) {
