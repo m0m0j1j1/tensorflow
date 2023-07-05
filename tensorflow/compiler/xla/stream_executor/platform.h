@@ -98,9 +98,6 @@ struct StreamExecutorConfig {
 
   // The DeviceOptions for the returned StreamExecutor.
   DeviceOptions device_options;
-
-  // The stream group id of the given stream executor for the given device.
-  int stream_id = 0;
 };
 
 // Help to encode and decode the device_ordinal variable in stream_executor.
