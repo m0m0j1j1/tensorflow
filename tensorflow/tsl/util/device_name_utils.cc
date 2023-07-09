@@ -17,7 +17,6 @@ limitations under the License.
 
 #include <algorithm>
 
-#include "absl/strings/str_cat.h"
 #include "tensorflow/tsl/platform/errors.h"
 
 namespace tsl {
@@ -644,9 +643,7 @@ std::vector<string> DeviceNameUtils::GetLocalNamesForDeviceMappings(
 /*static*/ tsl::StatusOr<string>
 DeviceNameUtils::GetDeviceNameFromStreamDeviceName(const string& device_name) {
   if (!IsStreamDeviceName(device_name)) {
-    return tsl::Status(
-        absl::StatusCode::kInvalidArgument,
-        absl::StrCat("Invalid stream device name: ", device_name));
+    return errors::InvalidArgument("Invalid stream device name: ", device_name);
   }
   string output = device_name;
   size_t pos = output.rfind("STREAM_GPU_");
@@ -664,9 +661,7 @@ DeviceNameUtils::GetDeviceNameFromStreamDeviceName(const string& device_name) {
 /*static*/ tsl::StatusOr<int> DeviceNameUtils::DecodeDeviceFromStreamDeviceName(
     const string& device_name) {
   if (!IsStreamDeviceName(device_name)) {
-    return tsl::Status(
-        absl::StatusCode::kInvalidArgument,
-        absl::StrCat("Invalid stream device name: ", device_name));
+    return errors::InvalidArgument("Invalid stream device name: ", device_name);
   }
   size_t pos = device_name.rfind("STREAM_GPU_");
   if (pos == string::npos) {
@@ -679,9 +674,7 @@ DeviceNameUtils::GetDeviceNameFromStreamDeviceName(const string& device_name) {
 /*static*/ tsl::StatusOr<int> DeviceNameUtils::DecodeStreamFromStreamDeviceName(
     const string& device_name) {
   if (!IsStreamDeviceName(device_name)) {
-    return tsl::Status(
-        absl::StatusCode::kInvalidArgument,
-        absl::StrCat("Invalid stream device name: ", device_name));
+    return errors::InvalidArgument("Invalid stream device name: ", device_name);
   }
   return std::stoi(device_name.substr(device_name.find_last_of(":") + 1));
 }
