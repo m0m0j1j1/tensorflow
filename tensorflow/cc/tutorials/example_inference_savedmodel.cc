@@ -11,6 +11,8 @@
 #include "tensorflow/cc/ops/standard_ops.h"
 #include "tensorflow/cc/saved_model/loader.h"
 #include "tensorflow/compiler/jit/flags.h"
+#include "tensorflow/core/common_runtime/device.h"
+#include "tensorflow/core/common_runtime/device_mgr.h"
 #include "tensorflow/core/framework/graph.pb.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/graph/default_device.h"
@@ -36,6 +38,9 @@ using std::chrono::system_clock;
 #define NUM_THREADS 3
 
 namespace tensorflow {
+
+// The GPU host allocator.
+static Allocator *host_allocator = nullptr;
 
 namespace example {
 
@@ -190,7 +195,8 @@ void GenerateInputs(const GraphDef &graph_def,
   for (int i = 0; i < input_names.size(); i++) {
     auto tensorshape = getNodeShape(graph_def, input_names[i], batch_size);
     auto tensortype = getNodeType(graph_def, input_names[i]);
-    Tensor t = Tensor(tensortype, tensorshape);
+    Tensor t = host_allocator ? Tensor(host_allocator, tensortype, tensorshape)
+                              : Tensor(tensortype, tensorshape);
     RandomInitialize(t);
     input_tensors.push_back(t);
   }
@@ -291,6 +297,19 @@ Status Test(SavedModelBundle &bundle, std::vector<std::string> &input_names,
   // // SetDevice("/device:GPU:0", &graph_def);
   // TF_CHECK_OK(session->Create(graph_def));
 
+  const DeviceMgr *device_manager;
+  TF_CHECK_OK(session->LocalDeviceManager(&device_manager));
+  std::vector<Device *> devices = device_manager->ListDevices();
+  for (auto *d : devices) {
+    if (d->parsed_name().type == "CPU") {
+      LOG(INFO) << "CPU device: " << d->name();
+      AllocatorAttributes attr;
+      attr.set_gpu_compatible(true);
+      host_allocator = d->GetAllocator(attr);
+      break;
+    }
+  }
+
   std::vector<Tensor> input_tensors_tf;
   GenerateInputs(graph_def, input_names, input_tensors_tf, batch_size);
 
@@ -307,7 +326,7 @@ Status Test(SavedModelBundle &bundle, std::vector<std::string> &input_names,
         &output_tensors_tf[0]);
   sleep(1);
 
-  // the seconed session run can be used to compare single thread runing
+  // the second session run can be used to compare single thread runing
   auto start = system_clock::now();
   TFRun(session.get(), num_infers_per_thread, &inputs_tf, &output_names,
         &output_tensors_tf[0]);

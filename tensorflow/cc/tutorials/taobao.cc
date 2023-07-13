@@ -458,7 +458,7 @@ Status Test(GraphDef& graph_def, std::vector<std::string>& input_names,
   threads.clear();
   sleep(1);
 
-  // the seconed session run can be used to compare single thread runing
+  // the second session run can be used to compare single thread runing
   auto start = std::chrono::system_clock::now();
   TFRun(session.get(), num_infers_per_thread, &inputs_tf, &output_names,
         &output_tensors_tf[0]);
