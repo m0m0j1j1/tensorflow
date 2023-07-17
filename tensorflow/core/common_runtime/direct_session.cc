@@ -86,6 +86,14 @@ namespace tensorflow {
 
 namespace {
 
+static const bool node_level_multistream = [] {
+  bool node_level_multistream;
+  TF_CHECK_OK(ReadBoolFromEnvVar("TF_NODE_LEVEL_MULTISTREAM",
+                                 /*default_val=*/false,
+                                 &node_level_multistream));
+  return node_level_multistream;
+}();
+
 auto* direct_session_runs = monitoring::Counter<0>::New(
     "/tensorflow/core/direct_session_runs",
     "The number of times DirectSession::Run() has been called.");
@@ -729,8 +737,8 @@ Status DirectSession::RunInternal(
   Status run_status;
 
   auto set_threadpool_args_for_item =
-      [&default_runner, &handler](const PerPartitionExecutorsAndLib& item,
-                                  Executor::Args* args) {
+      [this, &default_runner, &handler](const PerPartitionExecutorsAndLib& item,
+                                        Executor::Args* args) {
         // TODO(azaks): support partial run.
         // TODO(azaks): if the device picks its own threadpool, we need to
         // assign
@@ -749,6 +757,27 @@ Status DirectSession::RunInternal(
         if (handler != nullptr) {
           args->user_intra_op_threadpool =
               handler->AsIntraThreadPoolInterface();
+        }
+        if (node_level_multistream) {
+          int stream_group_count = device_mgr_->StreamGroupCount();
+          args->nlp_runners.reserve(stream_group_count);
+          for (int j = 0; j < stream_group_count; ++j) {
+            auto pool = thread_pools_[j % thread_pools_.size()].first;
+            if (!device_thread_pool) {
+              args->nlp_runners.push_back(
+                  [this, pool](Executor::Args::Closure c) {
+                    pool->Schedule(std::move(c));
+                  });
+            } else {
+              thread::ThreadPool* stream_thread_pool =
+                  device_mgr_->LookupStream(item.device, j)
+                      ->tensorflow_device_thread_pool();
+              args->nlp_runners.push_back(
+                  [this, stream_thread_pool](Executor::Args::Closure c) {
+                    stream_thread_pool->Schedule(std::move(c));
+                  });
+            }
+          }
         }
       };
 
@@ -779,7 +808,9 @@ Status DirectSession::RunInternal(
     for (int i = 0; i < executors_and_keys->items.size(); ++i) {
       const auto& item =
           stream_group_idx == -1 ||
-                  executors_and_keys->stream_items[i].size() <= stream_group_idx
+                  executors_and_keys->stream_items[i].size() <=
+                      stream_group_idx ||
+                  node_level_multistream
               ? executors_and_keys->items[i]
               : executors_and_keys->stream_items[i][stream_group_idx];
       set_threadpool_args_for_item(item, &args);

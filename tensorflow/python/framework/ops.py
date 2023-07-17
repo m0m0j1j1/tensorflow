@@ -76,9 +76,13 @@ from tensorflow.python.util import tf_stack
 from tensorflow.python.util import traceback_utils
 from tensorflow.python.util.compat import collections_abc
 from tensorflow.python.util.deprecation import deprecated_args
+from tensorflow.python.util.lazy_loader import LazyLoader
 from tensorflow.python.util.tf_export import kwarg_only
 from tensorflow.python.util.tf_export import tf_export
 
+multi_stream = LazyLoader(
+    "multi_stream", globals(),
+    "tensorflow.python.cuda.multi_stream")
 
 # Temporary global switches determining if we should enable the work-in-progress
 # calls to the C API. These will be removed once all functionality is supported.
@@ -1727,8 +1731,18 @@ def get_gradient_function(op):
     op_type = op.get_attr("_gradient_op_type")
   except ValueError:
     op_type = op.type
-  return gradient_registry.lookup(op_type)
 
+  fn = gradient_registry.lookup(op_type)
+  if multi_stream.multi_stream_is_enabled():
+    _include_grad = op.node_def.attr["_include_grad"].b
+    if _include_grad:
+      _stream_id = op.node_def.attr["_stream_id"]
+      stream = multi_stream.get_stream(stream_id=_stream_id)
+      def stream_scope_wrapper():
+        with multi_stream.stream_scope(stream=stream, include_grad=False):
+          return fn()
+      return stream_scope_wrapper
+  return fn
 
 def set_shape_and_handle_data_for_outputs(_):
   """No op. TODO(b/74620627): Remove this."""
@@ -4289,6 +4303,15 @@ class Graph(pywrap_tf_session.PyGraph):
     """
     return self._group_lock.group(_SESSION_RUN_LOCK_GROUP)
 
+  @property
+  def stream_manager(self):
+    if not hasattr(self._thread_local, "_stream_manager"):
+      self._thread_local._stream_manager = multi_stream.GraphStreamManager()
+    return self._thread_local._stream_manager
+
+  @stream_manager.setter
+  def stream_manager(self, stream_manager):
+    self._thread_local._stream_manager = stream_manager
 
 # TODO(agarwal): currently device directives in an outer eager scope will not
 # apply to inner graph mode code. Fix that.

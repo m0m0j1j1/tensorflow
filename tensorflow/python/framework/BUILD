@@ -1177,6 +1177,7 @@ py_strict_library(
         "//tensorflow/python:pywrap_tfe",
         "//tensorflow/python:tf2",
         "//tensorflow/python/client:pywrap_tf_session",
+        "//tensorflow/python/cuda",
         "//tensorflow/python/eager:context",
         "//tensorflow/python/eager:core",
         "//tensorflow/python/eager:monitoring",

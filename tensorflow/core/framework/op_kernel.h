@@ -657,6 +657,8 @@ class OpKernelContext {
     bool is_input_dead = false;
 
     absl::Span<const AllocatorAttributes> input_alloc_attrs;
+    const gtl::InlinedVector<DeviceContext*, 4>* input_device_contexts =
+        nullptr;
 
     // Device context.
     DeviceContext* op_device_context = nullptr;
@@ -697,6 +699,13 @@ class OpKernelContext {
 
     // To hold some CPU tensors until the session run finish.
     TensorHolder* tensor_holder = nullptr;
+
+    // A map from the node names to their types.
+    const std::unordered_map<std::string, std::string>* node_type_map = nullptr;
+
+    // For reducing unnecessary stream wait in multi-stream training.
+    std::map<std::pair<std::string, int>, std::atomic<bool>>*
+        stream_wait_flags = nullptr;
   };
 
   // params must outlive the OpKernelContext.
@@ -1032,6 +1041,18 @@ class OpKernelContext {
   // Returns nullptr if allocate_output() or set_output() have not been called.
   Status mutable_output(StringPiece name, Tensor** tensor);
 
+  // Records device specific state about how the input tensors were
+  // computed.
+  //
+  // If using the templated function, the type must be a subclass
+  // of DeviceContext.
+  //
+  // Get the DeviceContext used for the index input.  Returns nullptr
+  // if no DeviceContext was provided.
+  template <typename T>
+  T* input_device_context(int index);
+  DeviceContext* input_device_context(int index);
+
   // Return the DeviceContext that should be used for this Op.
   //
   // If using the templated function, the type must be a subclass
@@ -1263,6 +1284,20 @@ class OpKernelContext {
       value.tensor = nullptr;
     }
     outputs_.resize(num_outputs);
+  }
+
+  std::string node_type(std::string node_name) {
+    if (params_->node_type_map->find(node_name) ==
+        params_->node_type_map->end()) {
+      VLOG(2) << "No node in node_type_map: " << node_name;
+      return "MustSyncOp";
+    }
+    return params_->node_type_map->at(node_name);
+  }
+
+  std::map<std::pair<std::string, int>, std::atomic<bool>>* stream_wait_flags()
+      const {
+    return params_->stream_wait_flags;
   }
 
  private:
@@ -1645,6 +1680,23 @@ T* OpKernelContext::op_device_context() {
   static_assert(std::is_base_of<DeviceContext, T>::value,
                 "T is not a subclass of DeviceContext");
   return static_cast<T*>(op_device_context());
+}
+
+template <typename T>
+T* OpKernelContext::input_device_context(int index) {
+  DCHECK_NE(params_->input_device_contexts, nullptr);
+  DCHECK_GE(index, 0);
+  DCHECK_LT(index, params_->input_device_contexts->size());
+  static_assert(std::is_base_of<DeviceContext, T>::value,
+                "T is not a subclass of DeviceContext");
+  return static_cast<T*>((*params_->input_device_contexts)[index]);
+}
+
+inline DeviceContext* OpKernelContext::input_device_context(int index) {
+  DCHECK_NE(params_->input_device_contexts, nullptr);
+  DCHECK_GE(index, 0);
+  DCHECK_LT(index, params_->input_device_contexts->size());
+  return (*params_->input_device_contexts)[index];
 }
 
 inline const Tensor& OpInputList::operator[](int i) const {

@@ -1,0 +1,8 @@
+1:.*input_layer/input_layer/adgroup_id_embedding.*,.*input_layer/input_layer/age_level_embedding.*,.*input_layer/input_layer/brand_embedding.*,.*_task_ctr_expert_specific_0_.*,.*/lambda/.*,.*/lambda_6/.*,.*/lambda_12/.*
+2:.*input_layer/input_layer/campaign_id_embedding.*,.*input_layer/input_layer/cate_id_embedding.*,.*input_layer/input_layer/cms_group_id_embedding.*,.*_task_ctr_expert_specific_1_.*
+3:.*input_layer/input_layer/cms_segid_embedding.*,.*input_layer/input_layer/customer_embedding.*,.*_gate_specific_ctr_.*,.*_gate_softmax_specific_ctr/.*,.*/lambda_1/.*,.*/lambda_7/.*,.*/lambda_13/.*,.*_gate_mul_expert_specific_ctr/.*,.*PLE/ctr/.*
+4:.*input_layer/input_layer/occupation_embedding.*,.*input_layer/input_layer/pid_embedding.*,.*_task_cvr_expert_specific_0_.*,.*/lambda_2/.*,.*/lambda_8/.*,.*/lambda_14/.*
+5:.*input_layer/input_layer/price_embedding.*,.*input_layer/input_layer/pvalue_level_embedding.*,.*_task_cvr_expert_specific_1_.*
+6:.*input_layer/input_layer/shopping_level_embedding.*,.*input_layer/input_layer/tag_brand_list_embedding.*,.*_gate_specific_cvr_.*,.*_gate_softmax_specific_cvr/.*,.*/lambda_3/.*,.*/lambda_9/.*,.*/lambda_15/.*,.*_gate_mul_expert_specific_cvr/.*,.*PLE/cvr/.*,.*PLE/stack.*,.*PLE/Squeeze.*,.*PLE/Sigmoid.*,.*PLE/Round.*,.*head/loss/.*,.*head/Squeeze.*
+7:.*input_layer/input_layer/tag_category_list_embedding.*,.*input_layer/input_layer/user_id_embedding.*,.*_expert_shared_0_.*,.*/lambda_4/.*,.*/lambda_10/.*,.*_gate_mul_expert_shared/.*
+8:.*input_layer/input_layer/concat.*,.*input_layer/input_layer/new_user_class_level_embedding.*,.*_gate_shared_.*,.*_gate_softmax_shared/.*,.*/lambda_5/.*,.*/lambda_11/.*

@@ -161,6 +161,7 @@ py_library(
         "//tensorflow/python/compiler/mlir",
         "//tensorflow/python/compiler/tensorrt:init_py",
         "//tensorflow/python/compiler/xla:compiler_py",
+        "//tensorflow/python/cuda",
         "//tensorflow/python/data",
         "//tensorflow/python/debug:debug_py",
         "//tensorflow/python/distribute",

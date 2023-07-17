@@ -21,6 +21,7 @@ from tensorflow.core.framework import attr_value_pb2
 from tensorflow.core.framework import tensor_pb2
 from tensorflow.core.framework import tensor_shape_pb2
 from tensorflow.core.framework import types_pb2
+from tensorflow.python.cuda import multi_stream
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import op_callbacks
 from tensorflow.python.framework import op_def_library_pybind
@@ -720,6 +721,19 @@ def _ExtractRemainingAttrs(op_type_name, op_def, keywords,
                       f"{op_type_name}")
 
 
+def _AssignStreamToProto(attrs_proto):
+  g = ops.get_default_graph()
+  stream_id = g.stream_manager.get_cur_stream_id()
+  if stream_id:
+    stream_id_attr_value = value_to_attr_value(
+        stream_id, 'int', 'stream id assignment')
+    attrs_proto['_stream_id'] = stream_id_attr_value
+    _include_grad = g.stream_manager.get_cur_include_grad()
+    if _include_grad:
+      include_grad_attr_value = value_to_attr_value(
+          _include_grad, 'bool', 'if use the same stream assignments for grad op')
+      attrs_proto['_stream_assign_include_grad'] = include_grad_attr_value
+
 def _GetOpDef(op_type_name, keywords):
   """Returns the OpDef, Graph and Producer. For use in _apply_op_helper."""
   op_def = op_def_registry.get(op_type_name)
@@ -784,6 +798,9 @@ def _apply_op_helper(op_type_name, name=None, **keywords):  # pylint: disable=in
       _ExtractOutputStructure(op_type_name, op_def, attr_protos,
                               output_structure)
       _CheckAllInputsUsed(op_type_name, keywords)
+
+    if multi_stream.multi_stream_is_enabled():
+      _AssignStreamToProto(attr_protos)
 
     # NOTE(mrry): We add an explicit colocation constraint between
     # the newly created op and any of its reference-typed inputs.

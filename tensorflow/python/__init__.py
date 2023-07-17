@@ -38,6 +38,7 @@ from tensorflow.python.eager import context
 
 # pylint: enable=wildcard-import
 
+from tensorflow.python import cuda
 # from tensorflow.python import keras
 from tensorflow.python.feature_column import feature_column_lib as feature_column
 # from tensorflow.python.layers import layers

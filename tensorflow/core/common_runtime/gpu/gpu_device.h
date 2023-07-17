@@ -120,6 +120,13 @@ class BaseGPUDevice : public LocalDevice {
   Status Init(const SessionOptions& options);
 #endif  // TF_GPU_USE_PJRT
 
+  Status FillContextID(const Graph* graph,
+                       DeviceContextID* device_context_id) override;
+
+  Status FillStreamWaitList(
+      const Graph* graph, DeviceContextID* device_context_id,
+      std::vector<std::pair<std::string, int>>& stream_wait_list) override;
+
   void Compute(OpKernel* op_kernel, OpKernelContext* context) override;
 
   Status Sync() override;
@@ -188,6 +195,12 @@ class BaseGPUDevice : public LocalDevice {
   // for the GPU or vGPU.
   static std::optional<tsl::TfDeviceId> FindTfDeviceId(se::Stream* compute);
 
+  Status TryGetDeviceContext(DeviceContext** out_context) override {
+    *out_context = device_context_;
+    device_context_->Ref();
+    return OkStatus();
+  }
+
  protected:
   Allocator* gpu_allocator_;  // not owned
   Allocator* cpu_allocator_;  // not owned
@@ -217,6 +230,7 @@ class BaseGPUDevice : public LocalDevice {
   int32 pending_cap_ = 0;
   bool timestamped_allocator_ = false;
   NodeFileWriter* node_file_writer_ = nullptr;  // not owned
+  const int stream_group_count_;
 
   // Initialize scratch buffers used by Eigen.
   Status InitScratchBuffers();
@@ -239,6 +253,10 @@ class BaseGPUDevice : public LocalDevice {
   Tensor CopyGpuTensorToHostDebugOnly(const Tensor& gpu_tensor);
   void LogInputs(OpKernel* op_kernel, OpKernelContext* context);
   void LogOutputs(OpKernel* op_kernel, OpKernelContext* context);
+
+  void WaitOnStream(OpKernel* op_kernel, OpKernelContext* context,
+                    se::Stream* stream, const int stream_id,
+                    const bool vlog_1 = false);
 };
 
 // A per-compute-stream utility that keeps track of kernels that have been

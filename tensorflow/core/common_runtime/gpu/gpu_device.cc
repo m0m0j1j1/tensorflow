@@ -52,6 +52,7 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/gpu/gpu_device.h"
 #include "tensorflow/core/common_runtime/gpu/gpu_id_manager.h"
 #include "tensorflow/core/common_runtime/gpu/gpu_process_state.h"
+#include "tensorflow/core/common_runtime/gpu/gpu_stream_util.h"
 #include "tensorflow/core/common_runtime/gpu/gpu_util.h"
 #include "tensorflow/core/common_runtime/gpu_device_context.h"
 #include "tensorflow/core/common_runtime/local_device.h"
@@ -151,6 +152,25 @@ typedef hipDeviceProp_t gpuDeviceProp_t;
 using se::rocm::ScopedActivateExecutorContext;
 
 #endif
+
+static const bool node_level_multistream = [] {
+  bool node_level_multistream;
+  TF_CHECK_OK(ReadBoolFromEnvVar("TF_NODE_LEVEL_MULTISTREAM",
+                                 /*default_val=*/false,
+                                 &node_level_multistream));
+  return node_level_multistream;
+}();
+
+const std::unordered_set<std::string> no_sync_ops = {"Const", "NoOp",
+                                                     "Variable", "VariableV2"};
+
+static const int64_t gpu_stream_group_count = [] {
+  int64_t gpu_stream_group_count;
+  TF_CHECK_OK(tensorflow::ReadInt64FromEnvVar("TF_GPU_STREAM_GROUP_COUNT",
+                                              /*default_val=*/1,
+                                              &gpu_stream_group_count));
+  return gpu_stream_group_count;
+}();
 
 // Eigen Ops directly allocate memory only for temporary buffers used
 // during OpKernel::Compute().  The recommended way of allocating such
@@ -434,7 +454,8 @@ BaseGPUDevice::BaseGPUDevice(const SessionOptions& options, const string& name,
       cpu_allocator_(cpu_allocator),
       scoped_allocator_mgr_(new ScopedAllocatorMgr(name)),
       tf_device_id_(tf_device_id),
-      sync_every_op_(sync_every_op) {
+      sync_every_op_(sync_every_op),
+      stream_group_count_(gpu_stream_group_count) {
   // XLA device IDs for GPUs are arbitrary but must be unique, so we hash device
   // names (which include a replica index even for multi-client).
   set_xla_global_id(Fingerprint32(name) % std::numeric_limits<int32_t>::max());
@@ -642,6 +663,52 @@ Status BaseGPUDevice::Init(const SessionOptions& options) {
   return OkStatus();
 }
 
+Status BaseGPUDevice::FillContextID(const Graph* graph,
+                                    DeviceContextID* device_context_id) {
+  VLOG(2) << "FillContextID";
+
+  // Special case for single stream.
+  if (stream_group_count_ == 1 || !node_level_multistream) {
+    return OkStatus();
+  }
+  const int64 before = Env::Default()->NowMicros();
+  gpu_stream_util::AssignStreamsOpts opts;
+  opts.max_streams = static_cast<int32>(stream_group_count_);
+  std::unordered_map<int, int> node_to_stream_id;
+  TF_RETURN_IF_ERROR(
+      gpu_stream_util::AssignStreams(graph, opts, &node_to_stream_id));
+  int64 elapsed = Env::Default()->NowMicros() - before;
+  VLOG(3) << "AssignStreams took " << elapsed << "us";
+
+  // Fill in the context map.  It is OK for this map to contain
+  // duplicate DeviceContexts so long as we increment the refcount.
+  device_context_id->resize(graph->num_node_ids());
+  for (Node* n : graph->nodes()) {
+    auto mapped_stream = node_to_stream_id[n->id()];
+    CHECK_LE(mapped_stream, stream_group_count_);
+    VLOG(3) << "Assigned stream " << node_to_stream_id[n->id()]
+            << " ==> stream[" << mapped_stream << "] for node id " << n->id()
+            << " " << n->type_string() << " " << n->name();
+    (*device_context_id)[n->id()] = mapped_stream;
+  }
+
+  return OkStatus();
+}
+
+Status BaseGPUDevice::FillStreamWaitList(
+    const Graph* graph, DeviceContextID* device_context_id,
+    std::vector<std::pair<std::string, int>>& stream_wait_list) {
+  VLOG(2) << "FillStreamWaitList";
+
+  // Special case for single stream.
+  if (stream_group_count_ == 1 || !node_level_multistream) {
+    return OkStatus();
+  }
+  gpu_stream_util::GetStreamWaitList(graph, device_context_id,
+                                     stream_wait_list);
+  return OkStatus();
+}
+
 string BaseGPUDevice::ComputeOpKernelDebugString(const OpKernel& op_kernel,
                                                  const int& stream_id) {
   return strings::StrCat(op_kernel.name(), " op ", op_kernel.type_string(),
@@ -736,6 +803,148 @@ void BaseGPUDevice::LogOutputs(OpKernel* op_kernel, OpKernelContext* context) {
   LOG(INFO) << "";
 }
 
+void BaseGPUDevice::WaitOnStream(OpKernel* op_kernel, OpKernelContext* context,
+                                 se::Stream* stream, const int stream_id,
+                                 const bool vlog_1) {
+  // If this op's device context is different from the other contexts,
+  // we must wait on the stream.
+  if (context->num_inputs() != op_kernel->num_inputs()) {
+    LOG(FATAL) << "Context input num " << context->num_inputs()
+               << " != kernel input num " << op_kernel->num_inputs();
+  }
+
+  static const bool ms_key_info_log = [] {
+    bool ms_key_info_log;
+    TF_CHECK_OK(ReadBoolFromEnvVar("TF_MULTI_STREAM_KEY_INFO_LOG",
+                                   /*default_val=*/false, &ms_key_info_log));
+    return ms_key_info_log;
+  }();
+
+  static const bool reduce_stream_wait = [] {
+    bool reduce_stream_wait;
+    TF_CHECK_OK(ReadBoolFromEnvVar("TF_REDUCE_STREAM_WAIT",
+                                   /*default_val=*/false, &reduce_stream_wait));
+    return reduce_stream_wait;
+  }();
+
+  std::unordered_map<se::Stream*, std::vector<std::string>> need_sync_stream;
+
+  std::set<std::tuple<int, int>> key_info_sync = {};
+  std::string key_info = "";
+  if (ms_key_info_log) key_info = "Node: " + op_kernel->name();
+
+  for (int i = 0; i < context->num_inputs(); ++i) {
+    const GPUDeviceContext* idc =
+        static_cast<GPUDeviceContext*>(context->input_device_context(i));
+    OP_REQUIRES(
+        context, idc != nullptr,
+        errors::Internal("Input device context ", i, " was not set properly."));
+    if (vlog_1 && op_kernel->type_string() != "Assign") {
+      const void* base;
+      size_t len;
+      if (context->has_input(i)) {
+        if (IsRefType(context->input_dtype(i))) {
+          Tensor tensor = context->mutable_input(i, false);
+          base = DMAHelper::base(&tensor);
+          len = tensor.TotalBytes();
+        } else {
+          const Tensor& tensor = context->input(i);
+          base = DMAHelper::base(&tensor);
+          len = tensor.TotalBytes();
+        }
+        LOG(INFO) << "Input " << i << " " << base << "  " << len;
+        LOG(INFO) << "  stream[" << stream_id << "].ThenWaitFor(stream["
+                  << idc->stream_id() << "])"
+                  << ((idc->stream() == stream) ? " not needed" : "");
+      }
+    }
+    std::string input_name = op_kernel->requested_input(i);
+    size_t dash_pos = input_name.rfind(":");
+    if (dash_pos != string::npos) {
+      input_name = input_name.substr(0, dash_pos);
+    }
+    if (no_sync_ops.find(context->node_type(input_name)) == no_sync_ops.end() &&
+        idc->stream() != stream) {
+      if (context->has_input(i)) {
+        if (IsRefType(context->input_dtype(i))) {
+          context->tensor_holder()->AddTensor(context->mutable_input(i, false));
+        } else {
+          context->tensor_holder()->AddTensor(context->input(i));
+        }
+      }
+      if (reduce_stream_wait) {
+        // Just collect information, don't really wait.
+        if (need_sync_stream.find(idc->stream()) == need_sync_stream.end()) {
+          need_sync_stream.emplace(idc->stream(),
+                                   std::vector<std::string>{input_name});
+        } else {
+          need_sync_stream[idc->stream()].push_back(input_name);
+        }
+
+        if (ms_key_info_log) {
+          key_info += std::string("\nPre-sync input: ") +
+                      op_kernel->requested_input(i) +
+                      ", streams: " + std::to_string(stream_id) + " to " +
+                      std::to_string(idc->stream_id());
+          key_info_sync.insert({stream_id, idc->stream_id()});
+        }
+      } else {
+        stream->ThenWaitFor(idc->stream());
+      }
+    }
+  }
+
+  if (reduce_stream_wait) {
+    for (const auto& it : need_sync_stream) {
+      bool wait_once = false;
+      for (const auto& name : it.second) {
+        // Mark all nodes on the stream waited.
+        auto* flags = context->stream_wait_flags();
+        if (wait_once) {
+          // Just set the flag, not really need to wait.
+          if (flags->find({name, stream_id}) != flags->end() &&
+              !flags->at({name, stream_id}).load(std::memory_order_relaxed)) {
+            flags->at({name, stream_id}).store(true, std::memory_order_relaxed);
+          }
+        } else if (flags->find({name, stream_id}) == flags->end()) {
+          // The input node only switch to this node in this stream. We must
+          // wait.
+          stream->ThenWaitFor(it.first);
+          wait_once = true;
+        } else {
+          auto& flag = flags->at({name, stream_id});
+          if (!flag.load(std::memory_order_relaxed)) {
+            // It's the first node in this stream to wait for the input node.
+            stream->ThenWaitFor(it.first);
+            flag.store(true, std::memory_order_relaxed);
+            wait_once = true;
+          }
+        }
+      }
+    }
+
+    if (ms_key_info_log) {
+      for (const auto& it : key_info_sync) {
+        auto [op_stream_id, input_stream_id] = it;
+        std::string op_stream =
+            op_stream_id > 1 ? "N" : std::to_string(op_stream_id);
+        std::string input_stream =
+            input_stream_id > 1 ? "N" : std::to_string(input_stream_id);
+        key_info += std::string("\nSync node: ") +
+                    std::to_string(op_stream_id) +
+                    std::to_string(input_stream_id) + ", type: " + op_stream +
+                    " to " + input_stream;
+      }
+      if (key_info_sync.empty()) {
+        key_info += ", no sync between streams";
+      } else {
+        key_info = std::string("===============\n") + key_info;
+      }
+      VLOG(0) << key_info;
+    }
+  }
+}
+
 void BaseGPUDevice::Compute(OpKernel* op_kernel, OpKernelContext* context) {
   // NOTE(tucker): We need to discriminate between Eigen GPU
   // operations and all others.  If an operation is Eigen
@@ -756,6 +965,10 @@ void BaseGPUDevice::Compute(OpKernel* op_kernel, OpKernelContext* context) {
   if (vlog_1) {
     VLOG(1) << "GpuDevice::ComputeHelper "
             << ComputeOpKernelDebugString(*op_kernel, stream_id);
+  }
+
+  if (node_level_multistream && stream_group_count_ > 1) {
+    WaitOnStream(op_kernel, context, stream, stream_id, vlog_1);
   }
 
   if (kernel_tracker_.get()) {
@@ -845,6 +1058,10 @@ void BaseGPUDevice::ComputeAsync(AsyncOpKernel* op_kernel,
   VLOG(1) << "GpuDevice::ComputeAsync " << op_kernel->name() << " op "
           << op_kernel->type_string() << " on GPU" << tf_device_id_
           << " stream[" << stream_id << "]";
+
+  if (node_level_multistream && stream_group_count_ > 1) {
+    WaitOnStream(op_kernel, context, stream, stream_id);
+  }
 
   bool should_log_inputs_and_outputs = ShouldLogInputsAndOutputs(op_kernel);
 

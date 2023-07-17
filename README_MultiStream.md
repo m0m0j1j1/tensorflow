@@ -120,3 +120,39 @@ Furthermore, Set `number_of_threads_in_one_threadpool` to specify how many threa
 Set `TF_GPU_THREAD_MODE=gpu_private` and `TF_GPU_THREAD_COUNT=N` to use `N` additional threads for every stream group to launch kernels, instead of using the threads from the thread pool. Set `TF_GPU_THREAD_MODE=gpu_shared` to let all the stream groups share `N` additional threads.
 
 See the **Best Practice** section in the [document](https://docs.google.com/document/d/1yL3lWk_iFKqLTyekkuaiKXZ78I0lPmD5kM1fghHRs4Y/edit?usp=sharing) for more information.
+
+## **New features for training**
+
+As the multi-stream feature is proved successful in accelerating the RecSys high-concurrent online inference, we further developed a node-level multi-stream function to help RecSys training. User can enable it by setting the environment variable `TF_NODE_LEVEL_MULTISTREAM=true`. Then user can set the stream for the given branch with Python API in building the model, for example:
+
+```
+input = tf.Placeholder(...)
+branch1 = B1(input)
+branch2 = B2(input)
+branch3 = B3(input)
+output = tf.concat([branch1, branch2, branch3])
+```
+
+where `B1`, `B2`, and `B3` are three branches contain some TF ops. By default, all the ops are executed in one stream, but now, the user can speicify
+
+```
+stream1, stream2, stream3 = tf.cuda.get_stream(1), tf.cuda.get_stream(2), tf.cuda.get_stream(3)
+input = tf.Placeholder(...)
+with tf.cuda.stream_scope(stream1):
+  branch1 = B1(input)
+with tf.cuda.stream_scope(stream2):
+  branch2 = B2(input)
+with tf.cuda.stream_scope(stream3):
+  branch3 = B3(input)
+output = tf.concat([branch1, branch2, branch3])
+```
+
+to put the three branches to different streams for parallelism. Unspecified nodes will be put to the default `stream0` as before or follow the stream placement of its predecessor node.
+
+The user can also write a rule file to manually specify the node placement, and set the environment variable `TF_STREAM_FROM_FILE=\path\to\the\rule\file` to enable it. Each line of rule file should follow the format of `stream_id:regex1,regex2,regex3,...`, where `regex` are used to match the node name. For example:
+
+```
+1:*B1*,*B2*
+2:*B3*
+3:*loss*
+```
