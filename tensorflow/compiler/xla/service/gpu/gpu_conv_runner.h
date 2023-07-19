@@ -75,6 +75,9 @@ struct GpuConvConfig {
   Shape input_shape;
   Shape filter_shape;
   Shape output_shape;
+  string cluster_name;  // Needed for NVTX range
+  string op_name;       // Needed for NVTX range
+  string op_type;       // Needed for NVTX range
   absl::optional<FusionConfig> fusion;
 };
 
@@ -132,6 +135,9 @@ struct GpuConvDescriptor {
   Window window;
   ConvolutionDimensionNumbers dnums;
   int64_t feature_group_count;
+  string cluster_name;  // Needed for NVTX range
+  string op_name;       // Needed for NVTX range
+  string op_type;       // Needed for NVTX range
 };
 
 // Returns the convolution configuration given a XLA HLO instruction.

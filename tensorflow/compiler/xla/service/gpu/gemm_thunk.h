@@ -36,6 +36,9 @@ struct GpuGemmConfig {
   Shape lhs_shape;
   Shape rhs_shape;
   Shape output_shape;
+  string cluster_name;  // Needed for NVTX ranges
+  string op_name;       // Needed for NVTX ranges
+  string op_type;       // Needed for NVTX ranges
   GemmBackendConfig backend_config;
 };
 

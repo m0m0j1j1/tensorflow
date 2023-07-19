@@ -134,6 +134,17 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "nvtx_utils",
+    srcs = ["nvtx_utils.cc",],
+    hdrs = ["nvtx_utils.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+      "//tensorflow/core:lib",
+      "@nvtx_archive//:nvtx",
+    ],
+)
+
 filegroup(
     name = "mobile_srcs_no_runtime",
     srcs = [

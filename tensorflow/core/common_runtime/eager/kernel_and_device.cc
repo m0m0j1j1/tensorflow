@@ -26,6 +26,7 @@ limitations under the License.
 #include "tensorflow/core/framework/cancellation.h"
 #include "tensorflow/core/framework/function.h"
 #include "tensorflow/core/framework/node_def.pb.h"
+#include "tensorflow/core/framework/nvtx_utils.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/resource_mgr.h"
 #include "tensorflow/core/framework/types.h"
@@ -298,6 +299,14 @@ Status KernelAndDeviceOp::Run(
   {
     port::ScopedFlushDenormal flush;
     port::ScopedSetRound round(FE_TONEAREST);
+    nvtx::ScopedRangeIfEnabled<nvtx::CoreDomain> nvtx_range(
+        kernel_->def().op(), [&]() {
+          return nvtx::GetNodeExecutionRangeMessage(
+              kernel_.get(), inputs.GetTensorValues()->size(),
+              *inputs.GetTensorValues(), [](const TensorValue& tensor_value) {
+                return tensor_value.tensor;
+              });
+        });
     // 'AnnotatedTraceMe' will trace both scheduling time on host and execution
     // time on device of the OpKernel.
     profiler::AnnotatedTraceMe activity(

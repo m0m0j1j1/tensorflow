@@ -28,6 +28,7 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/graph_view.h"
 #include "tensorflow/core/common_runtime/immutable_executor_state.h"
 #include "tensorflow/core/common_runtime/pending_counts.h"
+#include "tensorflow/core/common_runtime/propagator_debug_utils.h"
 #include "tensorflow/core/common_runtime/propagator_state.h"
 #include "tensorflow/core/common_runtime/renamed_device.h"
 #include "tensorflow/core/common_runtime/simple_propagator_state.h"
@@ -40,6 +41,7 @@ limitations under the License.
 #include "tensorflow/core/framework/log_memory.h"
 #include "tensorflow/core/framework/metrics.h"
 #include "tensorflow/core/framework/node_def_util.h"
+#include "tensorflow/core/framework/nvtx_utils.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/op_segment.h"
 #include "tensorflow/core/framework/tensor.h"
@@ -71,6 +73,7 @@ limitations under the License.
 #include "tensorflow/core/profiler/lib/connected_traceme.h"
 #include "tensorflow/core/profiler/lib/scoped_annotation.h"
 #include "tensorflow/core/profiler/lib/traceme_encode.h"
+#include "tensorflow/core/profiler/nvtx_utils.h"
 #include "tensorflow/core/protobuf/error_codes.pb.h"
 #include "tensorflow/core/util/tensor_slice_reader_cache.h"
 
@@ -781,6 +784,15 @@ void ExecutorState<PropagatorStateType>::Process(TaggedNode tagged_node,
     }
 
     Entry* first_input = propagator_.GetInputTensors(tagged_node);
+
+    nvtx::ScopedRangeIfEnabled<nvtx::CoreDomain> nvtx_range(
+        item.kernel->def().op(), [&]() {
+          return nvtx::GetNodeExecutionRangeMessage(
+              item.kernel, item.num_inputs, first_input,
+              [this](const Entry& entry) {
+                return GetTensorValueForDump(entry);
+              });
+        });
 
     // Only execute this node if it is not dead or it is a send/recv
     // transfer node. For transfer nodes, we need to propagate the "dead"

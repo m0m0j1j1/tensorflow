@@ -33,6 +33,7 @@ limitations under the License.
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
 #include "tensorflow/core/framework/bounds_check.h"
 #include "tensorflow/core/framework/numeric_op.h"
+#include "tensorflow/core/framework/nvtx_utils.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/register_types.h"
 #include "tensorflow/core/framework/tensor.h"
@@ -842,6 +843,8 @@ class SparseSegmentReductionOpBase<GPUDevice, T, Index, SegmentId>
 
     auto create_and_check_output = [this, context, input, indices, segment_ids,
                                     last_segment_id_host, done]() {
+      nvtx::ScopedKernelRangeIfEnabled<nvtx::CoreDomain> nvtx_range(this);
+
       // Ensure that within the callback, the proper GPU settings are
       // configured.
       auto stream = context->op_device_context()->stream();

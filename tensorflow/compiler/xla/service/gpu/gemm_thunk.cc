@@ -27,6 +27,7 @@ limitations under the License.
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/types.h"
+#include "tensorflow/core/profiler/nvtx_utils.h"
 #include "tensorflow/stream_executor/blas.h"
 #include "tensorflow/stream_executor/device_memory.h"
 
@@ -38,6 +39,9 @@ GpuGemmConfig GetGpuGemmConfig(const HloInstruction *gemm) {
   config.output_shape = gemm->shape();
   config.lhs_shape = gemm->operand(0)->shape();
   config.rhs_shape = gemm->operand(1)->shape();
+  config.cluster_name = gemm->GetModule()->name();  // Needed for NVTX ranges
+  config.op_name = gemm->metadata().op_name();      // Needed for NVTX ranges
+  config.op_type = gemm->metadata().op_type();      // Needed for NVTX ranges
   auto backend_config_or = gemm->backend_config<GemmBackendConfig>();
   config.backend_config = std::move(backend_config_or.ValueOrDie());
   return config;
@@ -311,6 +315,12 @@ Status RunGemm(const GpuGemmConfig &gemm_config,
 
   complex128 alpha = {backend_config.alpha_real(), backend_config.alpha_imag()};
   double beta = backend_config.beta();
+
+  tensorflow::nvtx::ScopedRangeIfEnabled<tensorflow::nvtx::CoreDomain>
+      nvtx_range(gemm_config.op_type, [&]() {
+        return tensorflow::nvtx::GetThunkExecutionRangeMessage(
+            gemm_config.cluster_name, gemm_config.op_name, gemm_config.op_type);
+      });
 
   switch (output_shape.element_type()) {
     case S32: {

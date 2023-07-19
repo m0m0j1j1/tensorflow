@@ -313,6 +313,11 @@ StatusOr<GpuConvConfig> GetGpuConvConfig(
       desc.scratch_size);
   config.conv_result_scale = backend_config.conv_result_scale();
 
+  // These are needed for NVTX ranges.
+  config.cluster_name = desc.cluster_name;
+  config.op_name = desc.op_name;
+  config.op_type = desc.op_type;
+
   switch (config.kind) {
     case CudnnConvKind::kForward:
     case CudnnConvKind::kForwardActivation:
@@ -489,6 +494,12 @@ StatusOr<GpuConvConfig> GetGpuConvConfig(
   descriptor.window = cudnn_call->window();
   descriptor.dnums = cudnn_call->convolution_dimension_numbers();
   descriptor.feature_group_count = cudnn_call->feature_group_count();
+
+  // These are needed for NVTX ranges.
+  descriptor.cluster_name = cudnn_call->GetModule()->name();
+  descriptor.op_name = cudnn_call->metadata().op_name();
+  descriptor.op_type = cudnn_call->metadata().op_type();
+
   return GetGpuConvConfig(descriptor, cudnn_call->ToString());
 }
 
