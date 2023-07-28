@@ -23,12 +23,13 @@ limitations under the License.
 
 namespace tensorflow {
 
-void GPUDeviceContext::CopyCPUTensorToDevice(
-    const Tensor* cpu_tensor, Device* device, Tensor* device_tensor,
-    StatusCallback done, bool sync_dst_compute,
-    TensorHolder* tensor_holder) const {
+void GPUDeviceContext::CopyCPUTensorToDevice(const Tensor* cpu_tensor,
+                                             Device* device,
+                                             Tensor* device_tensor,
+                                             StatusCallback done,
+                                             bool sync_dst_compute) const {
   GPUUtil::CopyCPUTensorToGPU(cpu_tensor, this, device, device_tensor, done,
-                              sync_dst_compute, tensor_holder);
+                              sync_dst_compute);
 }
 
 void GPUDeviceContext::CopyDeviceTensorToCPU(const Tensor* device_tensor,

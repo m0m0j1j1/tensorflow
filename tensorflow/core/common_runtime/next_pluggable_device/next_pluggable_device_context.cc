@@ -101,8 +101,7 @@ void NextPluggableDeviceContext::CopyDeviceTensorToCPU(
 
 void NextPluggableDeviceContext::CopyCPUTensorToDevice(
     const Tensor* cpu_tensor, Device* device, Tensor* device_tensor,
-    StatusCallback done, bool sync_dst_compute,
-    TensorHolder* tensor_holder) const {
+    StatusCallback done, bool sync_dst_compute) const {
   profiler::TraceMeProducer traceme(
       [] { return "NextPluggableDeviceContext::CopyCPUTensorToDevice"; },
       profiler::ContextType::kGeneric);

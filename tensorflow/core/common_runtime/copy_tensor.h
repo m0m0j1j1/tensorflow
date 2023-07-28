@@ -46,8 +46,7 @@ class CopyTensor {
                      const AllocatorAttributes dst_alloc_attr,
                      const Tensor* input, Tensor* output,
                      int dev_to_dev_stream_index, StatusCallback done,
-                     bool sync_dst_compute = true,
-                     TensorHolder* tensorholder = nullptr);
+                     bool sync_dst_compute = true);
 
   // Object used to call Register() at static-initialization time.
   // Note: This should only ever be used as a global-static object; no stack

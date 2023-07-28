@@ -328,8 +328,7 @@ void GPUUtil::CopyGPUTensorToCPU(Device* gpu_device,
 void GPUUtil::CopyCPUTensorToGPU(const Tensor* cpu_tensor,
                                  const DeviceContext* device_context,
                                  Device* gpu_device, Tensor* gpu_tensor,
-                                 StatusCallback done, bool sync_dst_compute,
-                                 TensorHolder* tensor_holder) {
+                                 StatusCallback done, bool sync_dst_compute) {
   VLOG(1) << "CopyCPUTensorToGPU";
   const DeviceBase::AcceleratorDeviceInfo* dev_info = nullptr;
   se::Stream* recv_stream = nullptr;
@@ -396,27 +395,22 @@ void GPUUtil::CopyCPUTensorToGPU(const Tensor* cpu_tensor,
     }
   }
 
-  if (gpu_device->merge_HtoD_copy_stream() && tensor_holder != nullptr &&
-      !do_staging) {
-    tensor_holder->AddTensor(*cpu_tensor);
-    input_ref.Unref();
-    done(OkStatus());
-  } else {
-    dev_info->event_mgr->ThenExecute(
-        recv_host_to_device_stream,
-        [recv_host_to_device_stream, done, input_ref, do_staging,
-         staging_buffer, host_memory_allocator]() {
-          if (do_staging) {
-            host_memory_allocator->DeallocateRaw(staging_buffer);
-          } else {
-            input_ref.Unref();
-          }
-          if (!recv_host_to_device_stream->ok()) {
-            LOG(FATAL) << "CPU->GPU Memcpy failed";
-          }
-          done(OkStatus());
-        });
-  }
+  bool merge_HtoD = gpu_device->merge_HtoD_copy_stream();
+  if (merge_HtoD) done(OkStatus());
+  dev_info->event_mgr->ThenExecute(
+      recv_host_to_device_stream,
+      [recv_host_to_device_stream, done, input_ref, do_staging, staging_buffer,
+       host_memory_allocator, merge_HtoD]() {
+        if (do_staging) {
+          host_memory_allocator->DeallocateRaw(staging_buffer);
+        } else {
+          input_ref.Unref();
+        }
+        if (!recv_host_to_device_stream->ok()) {
+          LOG(FATAL) << "CPU->GPU Memcpy failed";
+        }
+        if (!merge_HtoD) done(OkStatus());
+      });
 }
 
 Status GPUUtil::Sync(Device* gpu_device) {

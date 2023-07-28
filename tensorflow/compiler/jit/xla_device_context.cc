@@ -110,10 +110,11 @@ void XlaDeviceContext::CopyTensorInSameDevice(const Tensor* input_tensor,
   done(errors::Unimplemented("XLA->XLA same-device copies not implemented."));
 }
 
-void XlaDeviceContext::CopyCPUTensorToDevice(
-    const Tensor* cpu_tensor, Device* device, Tensor* device_tensor,
-    StatusCallback done, bool sync_dst_compute,
-    TensorHolder* tensor_holder) const {
+void XlaDeviceContext::CopyCPUTensorToDevice(const Tensor* cpu_tensor,
+                                             Device* device,
+                                             Tensor* device_tensor,
+                                             StatusCallback done,
+                                             bool sync_dst_compute) const {
   if (cpu_tensor->NumElements() == 0) {
     VLOG(2) << "CopyCPUTensorToDevice empty tensor";
     done(OkStatus());
